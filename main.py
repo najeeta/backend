@@ -4,14 +4,29 @@ from fastapi.responses import StreamingResponse
 from llm_runner import generate_stream, ChatRequest
 from thesys_genui_sdk.fast_api import with_c1_response
 from config.supabase_config import supabase
+from config.logging_config import setup_logging, get_logger
 from routers import instructors, lms_connections
 
+# Configure logging before anything else
+setup_logging()
+
+# Get logger for this module
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="Anita Backend API",
     description="AI Teaching Assistant Backend with Canvas Integration",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Log application startup"""
+    logger.info("=" * 60)
+    logger.info("Anita Backend API starting up")
+    logger.info("Version: 1.0.0")
+    logger.info("=" * 60)
 
 # CORS middleware for frontend integration
 app.add_middleware(

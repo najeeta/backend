@@ -1,5 +1,10 @@
 from typing import Optional, Dict, Any, List
 from config.supabase_config import supabase
+from config.logging_config import get_logger
+from services.lms_validators import LMSValidatorFactory, LMSValidationError
+
+# Set up logger for this module
+logger = get_logger(__name__)
 
 
 def create_lms_connection(
@@ -20,7 +25,28 @@ def create_lms_connection(
 
     Returns:
         Dict containing the created LMS connection record
+
+    Raises:
+        LMSValidationError: If the LMS connection validation fails
     """
+    # Step 1: Validate the connection before persisting
+    try:
+        logger.info(f"Validating LMS connection for {instructor_id} - {lms_type}")
+        validator = LMSValidatorFactory.create(lms_type, credentials)
+        validation_result = validator.validate()
+
+        if not validation_result.is_valid:
+            raise LMSValidationError(
+                f"LMS connection validation failed: {validation_result.message}"
+            )
+    except LMSValidationError:
+        # Re-raise validation errors
+        raise
+    except Exception as e:
+        # Wrap unexpected errors
+        raise LMSValidationError(f"Validation error: {str(e)}")
+
+    # Step 2: Persist to database (only if validation passes)
     data = {
         "instructor_id": instructor_id,
         "lms_type": lms_type,

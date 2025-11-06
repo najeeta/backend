@@ -1,33 +1,16 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Optional
-from datetime import datetime
 from services import instructor_service
+from models.instructor import (
+    InstructorCreate,
+    InstructorUpdate,
+    InstructorResponse
+)
+from config.logging_config import get_logger
+
+# Set up logger for this module
+logger = get_logger(__name__)
 
 router = APIRouter()
-
-
-# Pydantic Models
-class InstructorCreate(BaseModel):
-    """Request model for creating an instructor."""
-    clerk_user_id: str = Field(..., description="Clerk user ID for the instructor")
-
-
-class InstructorUpdate(BaseModel):
-    """Request model for updating an instructor."""
-    onboarding_completed: Optional[bool] = Field(None, description="Whether the instructor has completed onboarding")
-
-
-class InstructorResponse(BaseModel):
-    """Response model for instructor data."""
-    id: str = Field(..., description="UUID of the instructor")
-    clerk_user_id: str = Field(..., description="Clerk user ID")
-    onboarding_completed: bool = Field(default=False, description="Whether the instructor has completed onboarding")
-    created_at: datetime = Field(..., description="When the instructor was created")
-    updated_at: datetime = Field(..., description="When the instructor was last updated")
-
-    class Config:
-        from_attributes = True
 
 
 # Endpoints
@@ -45,10 +28,12 @@ def create_instructor(instructor: InstructorCreate):
         HTTPException 409: If an instructor with this clerk_user_id already exists
         HTTPException 500: If creation fails
     """
+    logger.info(f"POST /instructors - Creating instructor with clerk_user_id: {instructor.clerk_user_id}")
     try:
         # Check if instructor with this clerk_user_id already exists
         existing_instructor = instructor_service.get_instructor_by_clerk_id(instructor.clerk_user_id)
         if existing_instructor:
+            logger.warning(f"Attempted to create duplicate instructor with clerk_user_id: {instructor.clerk_user_id}")
             raise HTTPException(
                 status_code=409,
                 detail=f"Instructor with clerk_user_id '{instructor.clerk_user_id}' already exists"
@@ -58,16 +43,19 @@ def create_instructor(instructor: InstructorCreate):
         created_instructor = instructor_service.create_instructor(instructor.clerk_user_id)
 
         if not created_instructor:
+            logger.error(f"Failed to create instructor with clerk_user_id: {instructor.clerk_user_id}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to create instructor"
             )
 
+        logger.info(f"Successfully created instructor (ID: {created_instructor.get('id')}) with clerk_user_id: {instructor.clerk_user_id}")
         return created_instructor
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Unexpected error creating instructor with clerk_user_id {instructor.clerk_user_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -173,10 +161,12 @@ def delete_instructor(instructor_id: str):
         HTTPException 404: If instructor not found
         HTTPException 500: If deletion fails
     """
+    logger.info(f"DELETE /instructors/{instructor_id}")
     try:
         # Check if instructor exists
         instructor = instructor_service.get_instructor(instructor_id)
         if not instructor:
+            logger.warning(f"Attempted to delete non-existent instructor: {instructor_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"Instructor with id '{instructor_id}' not found"
@@ -186,16 +176,19 @@ def delete_instructor(instructor_id: str):
         success = instructor_service.delete_instructor(instructor_id)
 
         if not success:
+            logger.error(f"Failed to delete instructor: {instructor_id}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to delete instructor"
             )
 
+        logger.info(f"Successfully deleted instructor: {instructor_id}")
         return None
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Error deleting instructor {instructor_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"

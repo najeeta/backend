@@ -1,44 +1,18 @@
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
-from datetime import datetime
+from typing import List
 from services import lms_connection_service
+from services.lms_validators import LMSValidationError
+from models.lms_connection import (
+    LMSConnectionCreate,
+    LMSConnectionUpdate,
+    LMSConnectionResponse
+)
+from config.logging_config import get_logger
+
+# Set up logger for this module
+logger = get_logger(__name__)
 
 router = APIRouter()
-
-
-# Pydantic Models
-class LMSConnectionCreate(BaseModel):
-    """Request model for creating an LMS connection."""
-    instructor_id: str = Field(..., description="ID of the instructor")
-    lms_type: str = Field(..., description="Type of LMS (e.g., 'canvas', 'moodle')")
-    name: str = Field(..., description="Friendly name for this connection")
-    credentials: Dict[str, Any] = Field(..., description="LMS credentials (API key, token, etc.)")
-    is_active: bool = Field(default=True, description="Whether the connection is active")
-
-
-class LMSConnectionUpdate(BaseModel):
-    """Request model for updating an LMS connection."""
-    lms_type: Optional[str] = Field(None, description="Type of LMS")
-    name: Optional[str] = Field(None, description="Friendly name for this connection")
-    credentials: Optional[Dict[str, Any]] = Field(None, description="LMS credentials")
-    is_active: Optional[bool] = Field(None, description="Whether the connection is active")
-
-
-class LMSConnectionResponse(BaseModel):
-    """Response model for LMS connection data."""
-    id: str = Field(..., description="UUID of the LMS connection")
-    instructor_id: str = Field(..., description="ID of the instructor")
-    lms_type: str = Field(..., description="Type of LMS")
-    name: str = Field(..., description="Friendly name for this connection")
-    credentials: Dict[str, Any] = Field(..., description="LMS credentials")
-    is_active: bool = Field(..., description="Whether the connection is active")
-    last_sync: Optional[datetime] = Field(None, description="Last sync timestamp")
-    created_at: datetime = Field(..., description="When the connection was created")
-    updated_at: datetime = Field(..., description="When the connection was last updated")
-
-    class Config:
-        from_attributes = True
 
 
 # Endpoints
@@ -53,8 +27,10 @@ def create_lms_connection(connection: LMSConnectionCreate):
         LMSConnectionResponse with created connection data
 
     Raises:
+        HTTPException 400: If validation fails
         HTTPException 500: If creation fails
     """
+    logger.info(f"POST /lms-connections - Creating LMS connection for instructor: {connection.instructor_id}, type: {connection.lms_type}")
     try:
         created_connection = lms_connection_service.create_lms_connection(
             instructor_id=connection.instructor_id,
@@ -65,16 +41,26 @@ def create_lms_connection(connection: LMSConnectionCreate):
         )
 
         if not created_connection:
+            logger.error(f"Failed to create LMS connection for instructor: {connection.instructor_id}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to create LMS connection"
             )
 
+        logger.info(f"Successfully created LMS connection (ID: {created_connection.get('id')}) for instructor: {connection.instructor_id}")
         return created_connection
 
+    except LMSValidationError as e:
+        # Return 400 for validation errors (client errors)
+        logger.warning(f"LMS validation failed for instructor {connection.instructor_id}: {str(e)}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Unexpected error creating LMS connection for instructor {connection.instructor_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -95,10 +81,12 @@ def get_lms_connection(connection_id: str):
         HTTPException 404: If connection not found
         HTTPException 500: If retrieval fails
     """
+    logger.debug(f"GET /lms-connections/{connection_id}")
     try:
         connection = lms_connection_service.get_lms_connection(connection_id)
 
         if not connection:
+            logger.warning(f"LMS connection not found: {connection_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"LMS connection with id '{connection_id}' not found"
@@ -109,6 +97,7 @@ def get_lms_connection(connection_id: str):
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Error retrieving LMS connection {connection_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -252,10 +241,12 @@ def delete_lms_connection(connection_id: str):
         HTTPException 404: If connection not found
         HTTPException 500: If deletion fails
     """
+    logger.info(f"DELETE /lms-connections/{connection_id}")
     try:
         # Check if connection exists
         connection = lms_connection_service.get_lms_connection(connection_id)
         if not connection:
+            logger.warning(f"Attempted to delete non-existent LMS connection: {connection_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"LMS connection with id '{connection_id}' not found"
@@ -265,16 +256,19 @@ def delete_lms_connection(connection_id: str):
         success = lms_connection_service.delete_lms_connection(connection_id)
 
         if not success:
+            logger.error(f"Failed to delete LMS connection: {connection_id}")
             raise HTTPException(
                 status_code=500,
                 detail="Failed to delete LMS connection"
             )
 
+        logger.info(f"Successfully deleted LMS connection: {connection_id}")
         return None
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Error deleting LMS connection {connection_id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
